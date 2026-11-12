@@ -19,10 +19,11 @@ enum class NodeKind { Program, Block, Function, If, While, Return, Pass, Assign,
 struct Node {
     NodeKind kind;
     int line;
-    std::string text;
+    std::string text{};
     double number = 0.0;
-    std::vector<std::string> params;
-    std::vector<Node> children;
+    std::vector<std::string> params{};
+    std::vector<Node> children{};
+    bool string_literal = false;
 };
 
 std::vector<Token> tokenize(const std::string& source);

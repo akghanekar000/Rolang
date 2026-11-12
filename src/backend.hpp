@@ -4,6 +4,7 @@
 #include "frontend.hpp"
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -11,7 +12,7 @@ namespace rolang {
 struct Code;
 struct Function { std::shared_ptr<Code> code; };
 using Value = std::variant<std::monostate, double, bool, std::string, std::shared_ptr<Function>>;
-enum class Op { Constant, Load, Store, Pop, Unary, Binary, JumpFalse, Jump, MakeFunction, Call, Return, Nop };
+enum class Op { Constant, Load, Store, Pop, Unary, Binary, ToBool, JumpFalse, Jump, MakeFunction, Call, Return, Nop };
 struct Instruction {
     Op op;
     Value value{};

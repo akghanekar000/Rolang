@@ -32,7 +32,7 @@ def factorial(n):
 print("factorial:", factorial(5))
 ```
 
-The supported initial grammar includes function definitions and positional parameters, `return`, `if`/`else`, `while`, `pass`, name assignment, calls, numeric and string literals, `True`, `False`, `None`, arithmetic (`+ - * / // % **`), comparisons, boolean operators, unary operators, and parentheses. The built-in `print` accepts multiple values. Lists, `for`, imports, classes, comprehensions, exceptions, and full Python compatibility are not implemented.
+The supported initial grammar includes function definitions and positional parameters, `return`, `if`/`else`, `while`, `pass`, name assignment, nested and recursive calls, numeric and string literals, `True`, `False`, `None`, arithmetic (`+ - * / // % **`), comparisons, short-circuiting `and`/`or`, unary operators, and parentheses. `not` binds less tightly than comparisons; exponentiation binds more tightly than unary `+` and `-`. Calls and function definitions accept a trailing comma. The built-in `print` accepts multiple values. Indentation uses spaces; tabs in leading indentation are rejected. Lists, `for`, imports, classes, comprehensions, exceptions, and full Python compatibility are not implemented.
 
 ## Compiler architecture
 
@@ -42,4 +42,4 @@ The supported initial grammar includes function definitions and positional param
 - `src/backend.hpp`: bytecode and runtime interface.
 - `src/main.cpp`: CLI driver (`tokens`, `ast`, `check`, `compile`, `run`).
 
-The existing `src/*.c` and `rolange.py` are early prototypes retained for history/reference; the Makefile builds the C++17 implementation above. Run the focused smoke tests with `make test`.
+The existing `src/*.c` and `rolange.py` are early prototypes retained for history/reference; the Makefile builds the C++17 implementation above. Run the C++ compiler smoke and regression tests with `make test` (requires Python 3 for the test runner).

@@ -1,6 +1,8 @@
 #include "frontend.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -17,7 +19,10 @@ std::string location(int line, int column) { return std::to_string(line) + ":" +
 
 class Parser {
 public:
-    explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
+    explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {
+        if (tokens_.empty() || tokens_.back().kind != TokenKind::End)
+            throw std::runtime_error("parser received an incomplete token stream");
+    }
     Node program() {
         Node root{NodeKind::Program, peek().line};
         while (peek().kind != TokenKind::End) {
@@ -39,7 +44,7 @@ private:
     }
     Token expect_text(const std::string& text) {
         if (peek().text == text) return take();
-        throw std::runtime_error(location(peek().line, peek().column) + ": expected '" + text + "'");
+        throw std::runtime_error(location(peek().line, peek().column) + ": expected '" + text + "', got '" + peek().text + "'");
     }
     Node block(int line) {
         expect(TokenKind::Newline, "newline after ':'");
@@ -60,7 +65,11 @@ private:
             expect_text("(");
             Node n{NodeKind::Function, start.line}; n.text = name.text;
             if (peek().text != ")") {
-                do { n.params.push_back(expect(TokenKind::Name, "parameter name").text); } while (match_text(","));
+                while (true) {
+                    n.params.push_back(expect(TokenKind::Name, "parameter name").text);
+                    if (!match_text(",")) break;
+                    if (peek().text == ")") break;
+                }
             }
             expect_text(")"); expect_text(":");
             for (std::size_t i = 0; i < n.params.size(); ++i)
@@ -90,7 +99,8 @@ private:
         expect(TokenKind::Newline, "end of line"); return n;
     }
     int precedence(const Token& t) const {
-        if (t.text == "or") return 1; if (t.text == "and") return 2;
+        if (t.text == "or") return 1;
+        if (t.text == "and") return 2;
         if (t.text == "==" || t.text == "!=") return 3;
         if (t.text == "<" || t.text == "<=" || t.text == ">" || t.text == ">=") return 4;
         if (t.text == "+" || t.text == "-") return 5;
@@ -102,16 +112,26 @@ private:
         Token t = take();
         Node left{NodeKind::Literal, t.line};
         if (t.kind == TokenKind::Number) { left.number = t.number; }
-        else if (t.kind == TokenKind::String) { left.text = t.text; left.kind = NodeKind::Literal; left.number = 0; }
+        else if (t.kind == TokenKind::String) { left.text = t.text; left.kind = NodeKind::Literal; left.number = 0; left.string_literal = true; }
         else if (t.kind == TokenKind::Name) { left.kind = NodeKind::Name; left.text = t.text; }
         else if (t.text == "True" || t.text == "False" || t.text == "None") { left.kind = NodeKind::Literal; left.text = t.text; }
-        else if (t.text == "not" || t.text == "-" || t.text == "+") { left.kind = NodeKind::Unary; left.text = t.text; left.children.push_back(expression(7)); }
+        else if (t.text == "not" || t.text == "-" || t.text == "+") {
+            left.kind = NodeKind::Unary;
+            left.text = t.text;
+            left.children.push_back(expression(t.text == "not" ? 3 : 7));
+        }
         else if (t.text == "(") { left = expression(); expect_text(")"); }
         else throw std::runtime_error(location(t.line, t.column) + ": expected expression, got '" + t.text + "'");
         while (true) {
             if (peek().text == "(" && 9 >= min_precedence) {
                 Token call = take(); Node n{NodeKind::Call, call.line}; n.children.push_back(left);
-                if (peek().text != ")") { do { n.children.push_back(expression()); } while (match_text(",")); }
+                if (peek().text != ")") {
+                    while (true) {
+                        n.children.push_back(expression());
+                        if (!match_text(",")) break;
+                        if (peek().text == ")") break;
+                    }
+                }
                 expect_text(")"); left = std::move(n); continue;
             }
             int p = precedence(peek()); if (p < min_precedence) break;
@@ -124,20 +144,29 @@ private:
 
 void ast_print(const Node& n, std::ostringstream& out, int depth) {
     out << std::string(static_cast<std::size_t>(depth) * 2, ' ') << node_kind_name(n.kind) << " line=" << n.line;
-    if (!n.text.empty()) out << " value=" << std::quoted(n.text);
-    if (n.kind == NodeKind::Literal && n.text.empty()) out << " value=" << n.number;
+    if (n.kind == NodeKind::Literal && n.string_literal) out << " value=" << std::quoted(n.text);
+    else if (!n.text.empty()) out << " value=" << std::quoted(n.text);
+    if (n.kind == NodeKind::Literal && n.text.empty() && !n.string_literal) out << " value=" << n.number;
     if (!n.params.empty()) { out << " params=["; for (std::size_t i=0;i<n.params.size();++i) { if(i) out << ", "; out << n.params[i]; } out << "]"; }
     out << '\n'; for (const auto& child : n.children) ast_print(child, out, depth + 1);
 }
 } // namespace
 
 std::vector<Token> tokenize(const std::string& source) {
-    std::vector<Token> out; std::vector<int> indents{0}; int nesting = 0, line_no = 0;
+    std::vector<Token> out;
+    std::vector<int> indents{0};
+    std::vector<Token> open_parens;
+    int line_no = 0;
     std::istringstream input(source); std::string line;
     while (std::getline(input, line)) {
-        ++line_no; std::size_t first = line.find_first_not_of(' ');
+        ++line_no;
+        std::size_t first = line.find_first_not_of(" \t");
         if (first == std::string::npos || line[first] == '#') continue;
-        if (nesting == 0) {
+        if (open_parens.empty()) {
+            for (std::size_t j = 0; j < first; ++j) {
+                if (line[j] == '\t')
+                    throw std::runtime_error(location(line_no, static_cast<int>(j) + 1) + ": tabs are not allowed in indentation");
+            }
             int indent = static_cast<int>(first);
             if (indent > indents.back()) { indents.push_back(indent); out.push_back({TokenKind::Indent, "<indent>", 0, line_no, 1}); }
             else if (indent < indents.back()) {
@@ -145,7 +174,7 @@ std::vector<Token> tokenize(const std::string& source) {
                 if (indent != indents.back()) throw std::runtime_error(location(line_no, static_cast<int>(first)+1) + ": inconsistent indentation");
             }
         }
-        std::size_t i = nesting == 0 ? first : 0;
+        std::size_t i = open_parens.empty() ? first : 0;
         while (i < line.size()) {
             unsigned char ch = static_cast<unsigned char>(line[i]);
             if (std::isspace(ch)) { ++i; continue; }
@@ -156,17 +185,37 @@ std::vector<Token> tokenize(const std::string& source) {
                 while (i < line.size()) {
                     char c = line[i++]; if (c == quote) { closed = true; break; }
                     if (c == '\\') {
-                        if (i == line.size()) break;
-                        char e = line[i++]; switch (e) { case 'n': value += '\n'; break; case 't': value += '\t'; break; case 'r': value += '\r'; break; case '\\': value += '\\'; break; case '\'': value += '\''; break; case '"': value += '"'; break; default: value += e; }
+                        if (i == line.size())
+                            throw std::runtime_error(location(line_no, col) + ": incomplete escape sequence in string literal");
+                        char e = line[i++]; switch (e) { case 'n': value += '\n'; break; case 't': value += '\t'; break; case 'r': value += '\r'; break; case '\\': value += '\\'; break; case '\'': value += '\''; break; case '"': value += '"'; break; default: throw std::runtime_error(location(line_no, static_cast<int>(i)) + ": invalid escape sequence"); }
                     } else value += c;
                 }
                 if (!closed) throw std::runtime_error(location(line_no, col) + ": unterminated string literal");
                 out.push_back({TokenKind::String, value, 0, line_no, col}); continue;
             }
             if (std::isdigit(ch) || (line[i] == '.' && i + 1 < line.size() && std::isdigit(static_cast<unsigned char>(line[i+1])))) {
-                std::size_t begin = i; bool dot = false;
-                while (i < line.size() && (std::isdigit(static_cast<unsigned char>(line[i])) || (!dot && line[i] == '.'))) { if (line[i] == '.') dot = true; ++i; }
-                std::string text = line.substr(begin, i-begin); out.push_back({TokenKind::Number, text, std::strtod(text.c_str(), nullptr), line_no, col}); continue;
+                const std::size_t begin = i;
+                while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
+                if (i < line.size() && line[i] == '.') {
+                    ++i;
+                    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
+                }
+                if (i < line.size() && (line[i] == 'e' || line[i] == 'E')) {
+                    ++i;
+                    if (i < line.size() && (line[i] == '+' || line[i] == '-')) ++i;
+                    const std::size_t exponent_start = i;
+                    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
+                    if (i == exponent_start)
+                        throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
+                }
+                if (i < line.size() && (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_' || line[i] == '.'))
+                    throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
+                std::string text = line.substr(begin, i-begin);
+                char* end = nullptr;
+                const double value = std::strtod(text.c_str(), &end);
+                if (end != text.c_str() + text.size() || !std::isfinite(value))
+                    throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
+                out.push_back({TokenKind::Number, text, value, line_no, col}); continue;
             }
             if (std::isalpha(ch) || line[i] == '_') {
                 std::size_t begin = i++;
@@ -177,14 +226,22 @@ std::vector<Token> tokenize(const std::string& source) {
             bool found = false;
             for (const auto& op : operators) if (starts(line, i, op)) {
                 out.push_back({TokenKind::Operator, op, 0, line_no, col});
-                if (op == "(") ++nesting; else if (op == ")") { if (--nesting < 0) throw std::runtime_error(location(line_no,col)+": unmatched ')' "); }
+                if (op == "(") open_parens.push_back({TokenKind::Operator, op, 0, line_no, col});
+                else if (op == ")") {
+                    if (open_parens.empty())
+                        throw std::runtime_error(location(line_no, col) + ": unmatched ')'");
+                    open_parens.pop_back();
+                }
                 i += op.size(); found = true; break;
             }
             if (!found) throw std::runtime_error(location(line_no, col) + ": unexpected character '" + line[i] + "'");
         }
-        if (nesting == 0) out.push_back({TokenKind::Newline, "<newline>", 0, line_no, static_cast<int>(line.size()+1)});
+        if (open_parens.empty()) out.push_back({TokenKind::Newline, "<newline>", 0, line_no, static_cast<int>(line.size()+1)});
     }
-    if (nesting != 0) throw std::runtime_error(std::to_string(line_no) + ": unclosed parenthesis");
+    if (!open_parens.empty()) {
+        const Token& open = open_parens.back();
+        throw std::runtime_error(location(open.line, open.column) + ": unclosed '('");
+    }
     if (out.empty() || out.back().kind != TokenKind::Newline) out.push_back({TokenKind::Newline, "<newline>", 0, line_no ? line_no : 1, 1});
     while (indents.size() > 1) { indents.pop_back(); out.push_back({TokenKind::Dedent, "<dedent>", 0, line_no+1, 1}); }
     out.push_back({TokenKind::End, "<eof>", 0, line_no+1, 1}); return out;

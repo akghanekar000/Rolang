@@ -15,4 +15,5 @@ clean:
 	rm -rf build
 
 test: $(TARGET)
-	./tests/smoke.sh ./$(TARGET)
+	sh ./tests/smoke.sh ./$(TARGET)
+	python3 tests/test_cpp.py ./$(TARGET)

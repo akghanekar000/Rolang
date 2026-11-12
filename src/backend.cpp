@@ -38,7 +38,8 @@ private:
             case NodeKind::If: {
                 expression(n.children.at(0)); int no = emit(Op::JumpFalse, {}, "", 0, n.line); statement(n.children.at(1));
                 if (n.children.size() > 2) { int end = emit(Op::Jump, {}, "", 0, n.line); patch(no, static_cast<int>(code_->instructions.size())); statement(n.children.at(2)); patch(end, static_cast<int>(code_->instructions.size())); }
-                else patch(no, static_cast<int>(code_->instructions.size())); break;
+                else patch(no, static_cast<int>(code_->instructions.size()));
+                break;
             }
             case NodeKind::While: {
                 int start = static_cast<int>(code_->instructions.size()); expression(n.children.at(0)); int end = emit(Op::JumpFalse, {}, "", 0, n.line);
@@ -50,7 +51,8 @@ private:
     void expression(const Node& n) {
         switch(n.kind) {
             case NodeKind::Literal:
-                if (n.text == "True") emit(Op::Constant, Value{true}, "", 0, n.line);
+                if (n.string_literal) emit(Op::Constant, Value{n.text}, "", 0, n.line);
+                else if (n.text == "True") emit(Op::Constant, Value{true}, "", 0, n.line);
                 else if (n.text == "False") emit(Op::Constant, Value{false}, "", 0, n.line);
                 else if (n.text == "None") emit(Op::Constant, Value{std::monostate{}}, "", 0, n.line);
                 else if (!n.text.empty()) emit(Op::Constant, Value{n.text}, "", 0, n.line);
@@ -58,25 +60,38 @@ private:
                 break;
             case NodeKind::Name: emit(Op::Load, {}, n.text, 0, n.line); break;
             case NodeKind::Unary: expression(n.children.at(0)); emit(Op::Unary, {}, n.text, 0, n.line); break;
-            case NodeKind::Binary: expression(n.children.at(0)); expression(n.children.at(1)); emit(Op::Binary, {}, n.text, 0, n.line); break;
+            case NodeKind::Binary:
+                if (n.text == "and") {
+                    expression(n.children.at(0));
+                    const int false_branch = emit(Op::JumpFalse, {}, "", 0, n.line);
+                    expression(n.children.at(1));
+                    emit(Op::ToBool, {}, "", 0, n.line);
+                    const int end_branch = emit(Op::Jump, {}, "", 0, n.line);
+                    patch(false_branch, static_cast<int>(code_->instructions.size()));
+                    emit(Op::Constant, Value{false}, "", 0, n.line);
+                    patch(end_branch, static_cast<int>(code_->instructions.size()));
+                } else if (n.text == "or") {
+                    expression(n.children.at(0));
+                    const int right_branch = emit(Op::JumpFalse, {}, "", 0, n.line);
+                    emit(Op::Constant, Value{true}, "", 0, n.line);
+                    const int end_branch = emit(Op::Jump, {}, "", 0, n.line);
+                    patch(right_branch, static_cast<int>(code_->instructions.size()));
+                    expression(n.children.at(1));
+                    emit(Op::ToBool, {}, "", 0, n.line);
+                    patch(end_branch, static_cast<int>(code_->instructions.size()));
+                } else {
+                    expression(n.children.at(0));
+                    expression(n.children.at(1));
+                    emit(Op::Binary, {}, n.text, 0, n.line);
+                }
+                break;
             case NodeKind::Call:
-                for (const auto& arg : n.children) expression(arg);
+                if (n.children.empty()) throw std::runtime_error("call node has no callee");
+                expression(n.children.at(0));
+                for (std::size_t i = 1; i < n.children.size(); ++i) expression(n.children[i]);
                 emit(Op::Call, {}, "", static_cast<int>(n.children.size()-1), n.line);
-                // The callee is evaluated before arguments; rotate call operands via a temporary instruction order fix.
-                // Re-emit this expression correctly by rearranging its emitted chunk.
                 break;
             default: throw std::runtime_error("invalid expression node");
-        }
-        if (n.kind == NodeKind::Call) {
-            const int argc = static_cast<int>(n.children.size()-1);
-            const int begin = static_cast<int>(code_->instructions.size()) - argc - 1;
-            // Make call layout: callee first, followed by evaluated arguments.
-            auto end = code_->instructions.end();
-            Instruction call = std::move(*(end-1));
-            code_->instructions.erase(end-1);
-            code_->instructions.insert(code_->instructions.begin()+begin, std::move(call));
-            // This relocates instructions, so control-flow jump targets emitted earlier must be adjusted.
-            for (auto& ins : code_->instructions) if ((ins.op == Op::Jump || ins.op == Op::JumpFalse) && ins.target >= begin) ins.target += 1;
         }
     }
 };
@@ -93,6 +108,17 @@ double number(const Value& v) {
     if (auto p = std::get_if<bool>(&v)) return *p ? 1.0 : 0.0;
     throw std::runtime_error("numeric operation requires numbers");
 }
+bool equal_values(const Value& left, const Value& right) {
+    const bool left_numeric = std::holds_alternative<double>(left) || std::holds_alternative<bool>(left);
+    const bool right_numeric = std::holds_alternative<double>(right) || std::holds_alternative<bool>(right);
+    if (left_numeric && right_numeric) return number(left) == number(right);
+    if (left.index() != right.index()) return false;
+    if (std::holds_alternative<std::monostate>(left)) return true;
+    if (const auto* value = std::get_if<double>(&left)) return *value == std::get<double>(right);
+    if (const auto* value = std::get_if<bool>(&left)) return *value == std::get<bool>(right);
+    if (const auto* value = std::get_if<std::string>(&left)) return *value == std::get<std::string>(right);
+    return std::get<std::shared_ptr<Function>>(left) == std::get<std::shared_ptr<Function>>(right);
+}
 std::string display(const Value& v) {
     if (std::holds_alternative<std::monostate>(v)) return "None";
     if (auto p = std::get_if<bool>(&v)) return *p ? "True" : "False";
@@ -101,7 +127,7 @@ std::string display(const Value& v) {
     return "<function>";
 }
 std::string op_name(Op op) {
-    switch(op) { case Op::Constant:return "CONST"; case Op::Load:return "LOAD"; case Op::Store:return "STORE"; case Op::Pop:return "POP"; case Op::Unary:return "UNARY"; case Op::Binary:return "BINARY"; case Op::JumpFalse:return "JUMP_IF_FALSE"; case Op::Jump:return "JUMP"; case Op::MakeFunction:return "MAKE_FUNCTION"; case Op::Call:return "CALL"; case Op::Return:return "RETURN"; case Op::Nop:return "NOP"; } return "?";
+    switch(op) { case Op::Constant:return "CONST"; case Op::Load:return "LOAD"; case Op::Store:return "STORE"; case Op::Pop:return "POP"; case Op::Unary:return "UNARY"; case Op::Binary:return "BINARY"; case Op::ToBool:return "TO_BOOL"; case Op::JumpFalse:return "JUMP_IF_FALSE"; case Op::Jump:return "JUMP"; case Op::MakeFunction:return "MAKE_FUNCTION"; case Op::Call:return "CALL"; case Op::Return:return "RETURN"; case Op::Nop:return "NOP"; } return "?";
 }
 } // namespace
 
@@ -130,36 +156,52 @@ Value VM::execute(const Code& code, std::unordered_map<std::string, Value>& glob
                     if (ins.text=="print") stack.push_back(std::string("__rolang_builtin_print__"));
                     else if (auto it=locals.find(ins.text); it!=locals.end()) stack.push_back(it->second);
                     else if (auto it=globals.find(ins.text); it!=globals.end()) stack.push_back(it->second);
-                    else throw std::runtime_error("undefined name '"+ins.text+"'"); break;
+                    else throw std::runtime_error("undefined name '"+ins.text+"'");
+                    break;
                 case Op::Store: { Value v=pop(); if(module) globals[ins.text]=std::move(v); else locals[ins.text]=std::move(v); break; }
                 case Op::Pop: (void)pop(); break;
                 case Op::Nop: break;
                 case Op::Unary: { Value v=pop(); if(ins.text=="not") stack.push_back(!truthy(v)); else if(ins.text=="-") stack.push_back(-number(v)); else stack.push_back(number(v)); break; }
+                case Op::ToBool: { Value v=pop(); stack.push_back(truthy(v)); break; }
                 case Op::Binary: {
                     Value right=pop(), left=pop(); const auto& op=ins.text;
-                    if(op=="and") stack.push_back(truthy(left) && truthy(right)); else if(op=="or") stack.push_back(truthy(left) || truthy(right));
-                    else if(op=="+") { if(auto a=std::get_if<std::string>(&left)) { auto b=std::get_if<std::string>(&right); if(!b) throw std::runtime_error("cannot concatenate string and non-string"); stack.push_back(*a+*b); } else stack.push_back(number(left)+number(right)); }
+                    if(op=="+") { if(auto a=std::get_if<std::string>(&left)) { auto b=std::get_if<std::string>(&right); if(!b) throw std::runtime_error("cannot concatenate string and non-string"); stack.push_back(*a+*b); } else stack.push_back(number(left)+number(right)); }
                     else if(op=="-") stack.push_back(number(left)-number(right)); else if(op=="*") stack.push_back(number(left)*number(right));
                     else if(op=="/") { double b=number(right); if(b==0) throw std::runtime_error("division by zero"); stack.push_back(number(left)/b); }
                     else if(op=="//") { double b=number(right); if(b==0) throw std::runtime_error("division by zero"); stack.push_back(std::floor(number(left)/b)); }
-                    else if(op=="%") stack.push_back(std::fmod(number(left),number(right)));
+                    else if(op=="%") { double b=number(right); if(b==0) throw std::runtime_error("modulo by zero"); stack.push_back(std::fmod(number(left),b)); }
                     else if(op=="**") stack.push_back(std::pow(number(left),number(right)));
-                    else if(op=="==") stack.push_back(display(left)==display(right)); else if(op=="!=") stack.push_back(display(left)!=display(right));
+                    else if(op=="==") stack.push_back(equal_values(left,right)); else if(op=="!=") stack.push_back(!equal_values(left,right));
                     else if(op=="<") stack.push_back(number(left)<number(right)); else if(op=="<=") stack.push_back(number(left)<=number(right)); else if(op==">") stack.push_back(number(left)>number(right)); else if(op==">=") stack.push_back(number(left)>=number(right));
-                    else throw std::runtime_error("unknown operator "+op); break;
+                    else throw std::runtime_error("unknown operator "+op);
+                    break;
                 }
-                case Op::JumpFalse: if(!truthy(pop())) ip=ins.target; break;
-                case Op::Jump: ip=ins.target; break;
-                case Op::MakeFunction: { auto fn=std::make_shared<Function>(); fn->code=ins.function_code; stack.push_back(fn); break; }
+                case Op::JumpFalse:
+                    if(ins.target<0 || ins.target>static_cast<int>(code.instructions.size())) throw std::runtime_error("invalid jump target");
+                    if(!truthy(pop())) ip=ins.target;
+                    break;
+                case Op::Jump:
+                    if(ins.target<0 || ins.target>static_cast<int>(code.instructions.size())) throw std::runtime_error("invalid jump target");
+                    ip=ins.target;
+                    break;
+                case Op::MakeFunction: {
+                    if(!ins.function_code) throw std::runtime_error("function has no bytecode");
+                    auto fn=std::make_shared<Function>(); fn->code=ins.function_code; stack.push_back(fn); break;
+                }
                 case Op::Call: {
+                    if(ins.target<0) throw std::runtime_error("invalid argument count in bytecode");
+                    if(stack.size()<static_cast<std::size_t>(ins.target)+1) throw std::runtime_error("bytecode stack underflow");
                     std::vector<Value> args(static_cast<std::size_t>(ins.target));
                     for(int i=ins.target-1;i>=0;--i) args[static_cast<std::size_t>(i)]=pop();
                     Value callee=pop();
                     if(auto builtin=std::get_if<std::string>(&callee); builtin && *builtin=="__rolang_builtin_print__") {
                         std::string line; for(std::size_t i=0;i<args.size();++i) { if(i) line+=' '; line+=display(args[i]); }
-                        if(show_output_) std::cout << line << '\n'; output_.push_back(line); stack.push_back(std::monostate{});
+                        if(show_output_) std::cout << line << '\n';
+                        output_.push_back(line);
+                        stack.push_back(std::monostate{});
                     } else if(auto fn=std::get_if<std::shared_ptr<Function>>(&callee); fn && *fn) {
-                        if(args.size()!=(*fn)->code->params.size()) throw std::runtime_error((*fn)->code->name+"() argument count mismatch");
+                        if(!(*fn)->code) throw std::runtime_error("function has no bytecode");
+                        if(args.size()!=(*fn)->code->params.size()) throw std::runtime_error((*fn)->code->name+"() takes "+std::to_string((*fn)->code->params.size())+" argument(s), got "+std::to_string(args.size()));
                         std::unordered_map<std::string,Value> local;
                         for(std::size_t i=0;i<args.size();++i) local[(*fn)->code->params[i]]=args[i];
                         stack.push_back(execute(*(*fn)->code,globals,std::move(local),false));
