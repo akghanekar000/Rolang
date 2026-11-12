@@ -37,6 +37,8 @@ The supported initial grammar includes function definitions and positional param
 See [docs/LANGUAGE_SPEC.md](docs/LANGUAGE_SPEC.md) for the current C++ compiler's syntax and behavior, and [docs/SEMANTICS_DECISIONS.md](docs/SEMANTICS_DECISIONS.md) for language-design questions that remain open.
 The proposed, not-yet-approved Version 1 contract is in
 [docs/V1_SEMANTICS_PROPOSAL.md](docs/V1_SEMANTICS_PROPOSAL.md).
+The design-only runtime value and type architecture is in
+[docs/PHASE2_RUNTIME_VALUE_ARCHITECTURE.md](docs/PHASE2_RUNTIME_VALUE_ARCHITECTURE.md).
 
 ## Compiler architecture
 
