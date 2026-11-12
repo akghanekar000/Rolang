@@ -338,12 +338,25 @@ include undefined names, non-callable values, wrong arity, invalid operand
 types, division/modulo by zero, non-finite arithmetic, call-depth overflow,
 and instruction-limit overflow. Errors are not catchable in the language.
 
-`check` performs lexing and parsing; it does not execute a program or catch
-runtime errors. `run` compiles and executes the source in memory. The `compile`
-command writes a readable bytecode listing, not a bytecode file that the VM
-can load. **Implemented and tested** for syntax and runtime error locations,
-arity, arithmetic errors, malformed literals, and execution limits; exact
-diagnostic stability and any future catchable-error model are unresolved.
+`check` performs lexing and parsing, then runs the conservative Phase 1
+semantic analyzer. It reports source-located undefined names, known direct
+function-call arity mismatches, and invalid operators when both operand types
+are statically known. Semantic errors are written to standard error and make
+`check` exit nonzero. The analyzer uses possible bindings collected from the
+module and current function (including conditional/loop suites); it does not
+perform definite-assignment analysis, infer variable or parameter types, or
+capture enclosing-function locals. Calls whose target is dynamic or not
+unambiguously established remain runtime checks. `return` outside a function
+is still rejected by the parser before semantic analysis can run.
+
+The semantic pass is read-only and independent of bytecode generation.
+`run` still compiles and executes directly, while `compile` still writes a
+readable bytecode listing rather than a bytecode file the VM can load. Thus
+semantic findings change `check` only; they do not move errors earlier for
+`run` or `compile`. **Implemented and tested** for syntax and semantic
+locations, known arity, selected known operand incompatibilities, runtime
+errors, malformed literals, and execution limits; exact diagnostic stability
+and any future catchable-error model remain unresolved.
 
 ## Unsupported features and incomplete areas
 

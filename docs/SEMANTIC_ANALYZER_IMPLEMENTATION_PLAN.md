@@ -11,11 +11,12 @@ questions remain in [SEMANTIC_ANALYSIS_ARCHITECTURE.md](SEMANTIC_ANALYSIS_ARCHIT
 
 ## 1. Scope and compatibility boundary
 
-The first engine is a read-only pass over the existing C++17 AST. It reports
-structured findings and may return temporary per-node analysis facts. It does
-not generate bytecode, execute the VM, modify nodes, add IR, or generate native
-code. The initial implementation must not change the existing `check`, `run`,
-or `compile` command behavior.
+The engine is a read-only pass over the existing C++17 AST. It reports
+structured findings and temporary per-node analysis facts. It does not
+generate bytecode, execute the VM, modify nodes, add IR, or generate native
+code. The initial implementation activates the conservative findings in
+`check` only, as explicitly requested for Phase 1; `run` and `compile` retain
+their existing behavior.
 
 The following are observed facts about the current C++ implementation, not
 automatic approval to move errors to compile time:
@@ -52,8 +53,8 @@ scope_manager   type_checker    diagnostic_engine   AnalysisResult
   v               +------------------+                   |
 symbol_table ------------------------+-------------------+
 
-main.cpp (future, only after approval): parse -> analyze -> optional gate
-                                                   -> existing compile -> VM
+main.cpp: parse -> analyze for `check` only
+          `run` / `compile` -> existing backend paths unchanged
 
 backend.hpp/.cpp: unchanged; no dependency from semantic modules
 ```
@@ -447,16 +448,17 @@ or a stable function target.
 
 ## 6. First implementation phase
 
-Implement the service skeleton and rules below without connecting it to the
-CLI. Add semantic tests through the public analysis API.
+Implement the service skeleton and rules below through the public analysis
+API, with `check` as the sole CLI consumer. `run` and `compile` must not be
+gated on the analysis result.
 
 | Check | First implementation behavior | Rule status / gate |
 | --- | --- | --- |
-| Undefined name | Report a name only when no possible binding exists in the name's current function parameters/assignments, accessible module bindings, or builtin environment. Do not flag names with a possible assignment in a branch, loop, or later declaration merely because definite assignment was not proven. Do not count enclosing-function locals as candidates for a nested function. | Runtime lookup precedence is observable; static error timing, visibility, closures, and name rules are **pending approval**. This deliberately conservative subset needs an approved compile-time diagnostic policy before CLI activation. |
-| Function existence | A direct call through a `Name` may resolve to a user function only when the target is unambiguous under the selected binding policy. An entirely unknown callee name is an undefined-name finding. A non-name/dynamic callee is not statically classified as non-callable. | Function values, reassignment, builtin shadowing, and forward-reference treatment are **pending approval**. |
-| Known arity | Compare argument count with `FunctionSignature::parameter_names.size()` only for a known user-function target. `print` is variadic; unknown/dynamic callees are unchecked. Attach the declaration location as related information. | Exact positional count is current runtime behavior and a V1 proposal direction; moving the error earlier and declaration visibility are **pending approval**. |
+| Undefined name | Report a name only when no possible binding exists in the name's current function parameters/assignments, accessible module bindings, or builtin environment. Do not flag names with a possible assignment in a branch, loop, or later declaration merely because definite assignment was not proven. Do not count enclosing-function locals as candidates for a nested function. | This conservative subset is enabled for `check` only. Runtime lookup precedence is observed; broader visibility, definite-assignment, and normative closure rules remain unresolved. |
+| Function existence | A direct call through a `Name` may resolve to a user function only when the target is unambiguous under the selected binding policy. An entirely unknown callee name is an undefined-name finding. A non-name/dynamic callee is not statically classified as non-callable. | Dynamic calls, reassignment, builtin shadowing, and forward-reference treatment remain unresolved; the `check` subset does not diagnose indirect callees. |
+| Known arity | Compare argument count with `FunctionSignature::parameter_names.size()` only for a known user-function target. `print` is variadic; unknown/dynamic callees are unchecked. Attach the declaration location as related information. | Exact positional count is established runtime behavior and is enabled for unambiguous direct calls in `check`; broader declaration visibility remains unresolved. |
 | Return context | Carry `inside_function` through traversal. A `Return` node outside a function reports `invalid-return`; one inside a function is valid, whether bare or valued. Do not require all paths to return or check return types. | Parser currently rejects source-level out-of-function return before analysis. This analyzer defense applies to direct/malformed AST input; do not reclassify parser errors. Implicit `None` and typed returns are unchanged. |
-| Known invalid operations | Check only operand-type combinations from the current runtime table listed above, and only when operand types are statically known. Dynamic operands produce no static incompatibility claim and retain VM checking. | Promoting the finding to a compile-time error and normative operator rules are **pending approval**. Integer/float distinction, strict equality, conversions, Boolean arithmetic, truthiness, and division/modulo design remain pending. |
+| Known invalid operations | Check only operand-type combinations from the current runtime table listed above, and only when operand types are statically known. Dynamic operands produce no static incompatibility claim and retain VM checking. | Known incompatibilities are enabled as `check` errors by the requested Phase 1 integration. The runtime remains authoritative; this does not approve future type-system rules. Integer/float distinction, conversions, truthiness, and division/modulo design remain pending. |
 | Source locations | Copy node line/column and caller-supplied source name into every diagnostic. | Available now; end spans and source text excerpts require future frontend/consumer support. |
 
 Duplicate function/variable declaration errors, definite assignment, whole
@@ -482,18 +484,12 @@ source -> tokenize -> parse -> const AST
                       existing VM / listing
 ```
 
-Do not wire this pass into `main.cpp` in the first implementation. A direct
-API and its tests can work without changing user-visible behavior. When
-semantic phase policy is approved, use one caller-side helper to analyze,
-format diagnostics, and gate code generation; keep the analyzer independent
-of `main.cpp` and the backend.
+The direct analysis API is consumed by `main.cpp` for `check` only. The CLI
+formats findings and returns nonzero for semantic errors. The analyzer remains
+independent of `main.cpp` and the backend.
 
-Eventually:
+Broader integration remains gated:
 
-- **`check`** should parse and then analyze, but continue to avoid bytecode
-  generation and execution. This intentionally changes its current
-  syntax-only contract and requires approval of which semantic findings fail
-  the command.
 - **`run`** should parse, analyze, stop on approved blocking errors, then call
   the same `compile(tree)` and VM path as today. The VM's runtime name, call,
   type, arithmetic, and resource checks stay in place for dynamic cases.
@@ -578,9 +574,9 @@ guard cases:
    policy.
 5. A nested function reference to an enclosing function's local must not be
    resolved through accidental closure lookup.
-6. Preserve CLI/backend regressions by running the existing `make test`;
-   before explicit CLI integration, its expected output and exit statuses
-   remain unchanged.
+6. Preserve CLI/backend regressions by running `make test`; verify the
+   intentional semantic findings in `check` separately and keep `run` and
+   `compile` behavior unchanged.
 
 The new test executable should be added to `make test` only when the analyzer
 exists. Continue to run the existing Python-driven C++ compiler tests as the
@@ -628,12 +624,12 @@ as semantic analyzer coverage.
    suppression; leave all unresolved type decisions pending.
 8. **Complete focused semantic tests and review false-positive boundaries:**
    run new tests plus `make test`; preserve existing runtime and CLI outputs.
-9. **Only after approval, integrate `check`, `run`, and `compile`:** add
-   caller-side analysis and formatting/gating while leaving backend and VM
-   behavior intact for accepted programs and dynamic runtime checks.
-10. **Document approved behavior separately:** update the language spec and
-    decision register only after semantic choices and compiler integration
-    have been approved and tested. Keep IR and native generation out of scope.
+9. **Keep the CLI boundary narrow:** `check` formats and gates on the
+   implemented Phase 1 findings; do not connect analysis to `run` or
+   `compile` without separately approved phase policies.
+10. **Document observed behavior separately:** update the language spec from
+    implemented and tested behavior. Keep unresolved language choices, IR,
+    and native generation out of scope.
 
 ## Validation performed for this blueprint
 

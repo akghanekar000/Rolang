@@ -169,6 +169,53 @@ print(choose())
             ["7"],
         )
 
+    def test_check_reports_semantic_errors_with_source_locations(self):
+        result = self.run_source("print(missing)\n", "check")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertRegex(
+            result.stderr,
+            r"program\.rol:1:7: semantic error\[undefined-name\]: undefined name 'missing'",
+        )
+
+        result = self.run_source(
+            "def add(a, b):\n    return a + b\nadd(1)\n",
+            "check",
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(
+            result.stderr,
+            r"program\.rol:3:1: semantic error\[argument-count\]: "
+            r"function 'add' expects 2 arguments, got 1",
+        )
+        self.assertRegex(result.stderr, r"program\.rol:1:1: note: function declared here")
+
+    def test_check_accepts_nested_functions_and_valid_variable_usage(self):
+        result = self.run_source(
+            "value = 3\n"
+            "def outer(parameter):\n"
+            "    def inner(argument):\n"
+            "        return argument\n"
+            "    return inner(parameter)\n"
+            "print(outer(value))\n",
+            "check",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.endswith("/program.rol: syntax OK\n"))
+
+    def test_semantic_check_does_not_gate_run_or_compile(self):
+        source = "def add(a, b):\n    return a + b\nadd(1)\n"
+        checked = self.run_source(source, "check")
+        self.assertNotEqual(checked.returncode, 0)
+
+        executed = self.run_source(source)
+        self.assertNotEqual(executed.returncode, 0)
+        self.assertIn("takes 2 argument(s), got 1", executed.stderr)
+
+        compiled = self.run_source(source, "compile")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        self.assertIn("compiled ", compiled.stdout)
+
     def test_not_has_lower_precedence_than_comparisons(self):
         self.assert_runs(
             """\

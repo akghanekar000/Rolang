@@ -1,4 +1,5 @@
 #include "backend.hpp"
+#include "semantic/semantic_analyzer.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -34,7 +35,25 @@ int main(int argc, char** argv) {
             for(const auto& t:tokenize(source)) std::cout<<t.line<<":"<<t.column<<" "<<token_kind_name(t.kind)<<" "<<t.text<<"\n";
         } else {
             Node tree=parse(tokenize(source));
-            if(command=="check") std::cout<<source_path<<": syntax OK\n";
+            if(command=="check") {
+                semantics::AnalysisOptions options;
+                options.source_name=source_path;
+                const auto result=semantics::SemanticAnalyzer{}.analyze(tree,options);
+                if(result.has_errors()) {
+                    for(const auto& diagnostic:result.diagnostics) {
+                        std::cerr<<diagnostic.location.source_name<<":"<<diagnostic.location.line<<":"
+                                 <<diagnostic.location.column<<": semantic error["
+                                 <<semantics::diagnostic_code_name(diagnostic.code)<<"]: "
+                                 <<diagnostic.message<<"\n";
+                        for(const auto& related:diagnostic.related) {
+                            std::cerr<<related.location.source_name<<":"<<related.location.line<<":"
+                                     <<related.location.column<<": note: "<<related.message<<"\n";
+                        }
+                    }
+                    return 1;
+                }
+                std::cout<<source_path<<": syntax OK\n";
+            }
             else if(command=="ast") std::cout<<ast_to_string(tree);
             else if(command=="compile") {
                 Code code=compile(tree); std::string dest=output_path.empty()?source_path+".rbc":output_path;
