@@ -1,46 +1,18 @@
-#include "rolang.h"
+# Rolang compiler interface
+CXX ?= c++
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic -O2
+CPP_SOURCES := src/main.cpp src/frontend.cpp src/backend.cpp
+TARGET := build/rolang
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+.PHONY: all clean test
+all: $(TARGET)
 
-Node *parse_program(Token *tokens, int count);
-void run_program(Node *program);
+$(TARGET): $(CPP_SOURCES) src/frontend.hpp src/backend.hpp
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -Isrc $(CPP_SOURCES) -o $@
 
-static char *read_file(const char *path) {
-    FILE *fp = fopen(path, "rb");
-    if (!fp) {
-        fprintf(stderr, "could not open file: %s\n", path);
-        exit(1);
-    }
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    char *buf = malloc((size_t)size + 1);
-    if (!buf) {
-        fprintf(stderr, "memory error\n");
-        exit(1);
-    }
-    fread(buf, 1, (size_t)size, fp);
-    buf[size] = '\0';
-    fclose(fp);
-    return buf;
-}
+clean:
+	rm -rf build
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <sourcefile>\n", argv[0]);
-        return 1;
-    }
-
-    char *source = read_file(argv[1]);
-    int token_count = 0;
-    Token *tokens = tokenize(source, &token_count);
-    Node *program = parse_program(tokens, token_count);
-    run_program(program);
-
-    free_node(program);
-    free_tokens(tokens, token_count);
-    free(source);
-    return 0;
-}
+test: $(TARGET)
+	./tests/smoke.sh ./$(TARGET)

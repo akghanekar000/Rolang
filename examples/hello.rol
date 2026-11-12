@@ -1,12 +1,13 @@
-CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -O2
-SRC = src/ast.c src/lexer.c src/parser.c src/vm.c src/main.c
-OUT = rolang
+# Python-style blocks, compiled and executed by the C++ Rolange toolchain.
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
 
-all:
-	$(CC) $(CFLAGS) $(SRC) -o $(OUT)
+print("Hello from Rolang")
+print("factorial(5) =", factorial(5))
 
-clean:
-	rm -f $(OUT)
-
-.PHONY: all clean
+count = 3
+while count > 0:
+    print(count)
+    count = count - 1
