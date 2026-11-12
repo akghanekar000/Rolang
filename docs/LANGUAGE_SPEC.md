@@ -201,37 +201,41 @@ counter resets for the next run. This bounds loops as well as recursive work.
 
 ## Values and type behavior
 
-The runtime value variants are:
+The active runtime uses tagged `Int64`, `Float64`, Boolean, String, Null,
+Function, and built-in-function values:
 
 | Source value | Runtime representation |
 | --- | --- |
-| Numeric literal | `double` |
+| Integer spelling without `.` or exponent | signed 64-bit `Int64` |
+| Decimal-point or exponent spelling | finite `Float64` (`double`) |
 | `True`, `False` | Boolean |
-| `None` | `None` value |
+| `None` | Null |
 | Quoted literal | String |
 | User-defined function | Function value |
 | `print` when not shadowed | Built-in function value |
 
-There is no distinct integer type. Numeric literals accept decimal and
-exponent notation and are represented as finite double-precision values.
-Boolean values are accepted by numeric operators as `True = 1` and
-`False = 0`. No explicit conversion functions exist. `print` formats values
-for display; it does not convert values for subsequent operations.
+The source spelling `-9223372036854775808` is accepted as the minimum Int64;
+positive integer literals above `9223372036854775807` are rejected. Boolean
+values remain accepted by numeric operators as `True = 1` and `False = 0`.
+Without a Float64 operand, Booleans participate as Int64 values in numeric
+arithmetic; with a Float64 operand they are promoted to Float64.
+No explicit conversion functions exist. `print` formats values for display;
+it does not convert values for subsequent operations.
 
-`+` adds numeric operands, except that a string left operand requires a
-string right operand and concatenates the two strings. Other string/numeric
-mixes fail. Numeric operations that produce a non-finite result fail.
-**Implemented, insufficiently tested** for most value/operator combinations;
-boolean/numeric equality and several error cases are tested.
+Int64 `+`, `-`, and `*` preserve Int64 and report `integer overflow` rather
+than overflowing. An operation with a Float64 operand promotes numeric
+operands to Float64. A string left operand to `+` requires a string right
+operand and concatenates the two strings. Other string/numeric mixes fail.
+Non-finite Float64 results fail. These rules are **implemented and tested**.
 
-Equality compares numeric values across `double` and Boolean (`True == 1` is
-true); same-type values compare by value for numbers, booleans, strings, and
-`None`. Other different-type pairs compare unequal. Function values compare
-by function-object identity. `!=` negates equality. Ordering operators accept
-numeric operands (including Booleans) and reject other types at runtime.
-**Implemented and tested** for the selected cross-type equality cases;
-remaining combinations are insufficiently tested and the cross-type policy is
-open to design review.
+Equality preserves the established numeric compatibility: Int64, Float64, and
+Boolean values compare numerically, so `True == 1` and `1 == 1.0` are true.
+Int64-to-Float64 equality uses the Float64 conversion and can therefore lose
+precision for large integers. Non-numeric different types compare unequal;
+same-type strings and Null compare by value, and functions by identity.
+Ordering accepts numeric operands (including Booleans). These semantics are
+**implemented and tested**, but remain subject to the language decision
+register rather than constituting approval of a normative V1 contract.
 
 **Invalid at runtime**:
 
@@ -243,13 +247,16 @@ print("value: " + 3)  # string concatenation requires two strings
 
 Supported arithmetic operators are `+`, `-`, `*`, `/`, `//`, `%`, and `**`.
 Unary `+` and `-` accept numeric operands (including Booleans). `/` produces
-a floating-point quotient. `//` applies floor to the quotient. `%` uses
-`fmod`, so its remainder follows the dividend's sign and may be fractional.
-Both division operators and `%` reject a zero divisor. `**` uses floating
-exponentiation. A non-finite arithmetic result raises a runtime error.
-**Implemented and tested** for ordinary arithmetic, division/modulo by zero,
-and non-finite results; negative/fractional division and modulo cases need
-more tests and their policy is unresolved.
+a Float64 quotient. Int64/Int64 `//` produces an Int64 floor quotient and
+Int64/Int64 `%` produces an Int64 remainder whose sign follows the divisor.
+If either operand is Float64, `//` produces the floating-point floor and `%`
+retains `fmod` behavior (remainder sign follows the dividend). Both division
+operators and `%` reject a zero divisor. Int64 `**` with a nonnegative Int64
+exponent returns checked Int64; a negative Int64 exponent or any Float64
+operand returns Float64. Unary integer negation and Int64 arithmetic are
+checked. Non-finite Float64 results raise a runtime error. These choices are
+**implemented and tested**; see [SEMANTICS_DECISIONS.md](SEMANTICS_DECISIONS.md)
+for choices that remain subject to language-design approval.
 
 Comparisons are `==`, `!=`, `<`, `<=`, `>`, and `>=`. Each comparison produces
 a Boolean. Repeated comparison operators parse as ordinary left-associated
@@ -274,8 +281,7 @@ undefined names, Boolean results, and mixed precedence.
 `None`, `False`, numeric zero (including negative zero), and the empty string
 are falsey. `True`, nonzero numbers, non-empty strings, user functions, and
 the built-in `print` are truthy. Conditions do not require a Boolean. This is
-**implemented and insufficiently tested** for every runtime value class; the
-truthiness policy is an unresolved design decision.
+**implemented and tested** for the runtime value classes.
 
 ### Operator precedence and associativity
 

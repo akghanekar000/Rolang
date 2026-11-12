@@ -1,6 +1,7 @@
 #ifndef ROLANGE_FRONTEND_HPP
 #define ROLANGE_FRONTEND_HPP
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,8 @@ struct Token {
     double number = 0.0;
     int line = 1;
     int column = 1;
+    std::int64_t integer = 0;
+    bool integer_literal = false;
 };
 
 enum class NodeKind { Program, Block, Function, If, While, Return, Pass, Assign, Expression, Literal, Name, Unary, Binary, Call };
@@ -25,6 +28,8 @@ struct Node {
     std::vector<Node> children{};
     bool string_literal = false;
     int column = 1;
+    std::int64_t integer = 0;
+    bool integer_literal = false;
 };
 
 std::vector<Token> tokenize(const std::string& source);

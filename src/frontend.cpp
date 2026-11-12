@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -30,12 +31,18 @@ public:
             if (match(TokenKind::Newline)) continue;
             root.children.push_back(statement());
         }
+        validate_integer_literals(root);
         return root;
     }
 private:
     const std::vector<Token>& tokens_;
     std::size_t pos_ = 0;
     int function_depth_ = 0;
+    static void validate_integer_literals(const Node& node) {
+        if (node.integer_literal && node.text == "9223372036854775808")
+            throw std::runtime_error(location(node.line, node.column) + ": integer literal out of range");
+        for (const auto& child : node.children) validate_integer_literals(child);
+    }
     const Token& peek(std::size_t offset = 0) const { return tokens_[std::min(pos_ + offset, tokens_.size() - 1)]; }
     Token take() { Token t = peek(); if (pos_ + 1 < tokens_.size()) ++pos_; return t; }
     bool match(TokenKind kind) { if (peek().kind == kind) { take(); return true; } return false; }
@@ -121,7 +128,12 @@ private:
         Token t = take();
         Node left{NodeKind::Literal, t.line};
         left.column = t.column;
-        if (t.kind == TokenKind::Number) { left.number = t.number; }
+        if (t.kind == TokenKind::Number) {
+            left.number = t.number;
+            left.integer = t.integer;
+            left.integer_literal = t.integer_literal;
+            if (t.integer_literal && t.text == "9223372036854775808") left.text = t.text;
+        }
         else if (t.kind == TokenKind::String) { left.text = t.text; left.kind = NodeKind::Literal; left.number = 0; left.string_literal = true; }
         else if (t.kind == TokenKind::Name) { left.kind = NodeKind::Name; left.text = t.text; }
         else if (t.text == "True" || t.text == "False" || t.text == "None") { left.kind = NodeKind::Literal; left.text = t.text; }
@@ -129,6 +141,14 @@ private:
             left.kind = NodeKind::Unary;
             left.text = t.text;
             left.children.push_back(expression(t.text == "not" ? 3 : 7));
+            if (t.text == "-" && left.children[0].integer_literal &&
+                left.children[0].text == "9223372036854775808") {
+                left.kind = NodeKind::Literal;
+                left.text.clear();
+                left.integer = std::numeric_limits<std::int64_t>::min();
+                left.integer_literal = true;
+                left.children.clear();
+            }
         }
         else if (t.text == "(") { left = expression(); expect_text(")"); }
         else throw std::runtime_error(location(t.line, t.column) + ": expected expression, got '" + t.text + "'");
@@ -154,9 +174,10 @@ private:
 
 void ast_print(const Node& n, std::ostringstream& out, int depth) {
     out << std::string(static_cast<std::size_t>(depth) * 2, ' ') << node_kind_name(n.kind) << " line=" << n.line;
-    if (n.kind == NodeKind::Literal && n.string_literal) out << " value=" << std::quoted(n.text);
+    if (n.kind == NodeKind::Literal && n.integer_literal) out << " value=" << n.integer;
+    else if (n.kind == NodeKind::Literal && n.string_literal) out << " value=" << std::quoted(n.text);
     else if (!n.text.empty()) out << " value=" << std::quoted(n.text);
-    if (n.kind == NodeKind::Literal && n.text.empty() && !n.string_literal) out << " value=" << n.number;
+    if (n.kind == NodeKind::Literal && n.text.empty() && !n.string_literal && !n.integer_literal) out << " value=" << n.number;
     if (!n.params.empty()) { out << " params=["; for (std::size_t i=0;i<n.params.size();++i) { if(i) out << ", "; out << n.params[i]; } out << "]"; }
     out << '\n'; for (const auto& child : n.children) ast_print(child, out, depth + 1);
 }
@@ -221,11 +242,28 @@ std::vector<Token> tokenize(const std::string& source) {
                 if (i < line.size() && (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_' || line[i] == '.'))
                     throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
                 std::string text = line.substr(begin, i-begin);
-                char* end = nullptr;
-                const double value = std::strtod(text.c_str(), &end);
-                if (end != text.c_str() + text.size() || !std::isfinite(value))
-                    throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
-                out.push_back({TokenKind::Number, text, value, line_no, col}); continue;
+                const bool integer_literal = text.find_first_of(".eE") == std::string::npos;
+                Token token{TokenKind::Number, text, 0.0, line_no, col};
+                token.integer_literal = integer_literal;
+                if (integer_literal) {
+                    constexpr std::uint64_t max_magnitude =
+                        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1;
+                    std::uint64_t magnitude = 0;
+                    for (char digit : text) {
+                        const unsigned int value = static_cast<unsigned int>(digit - '0');
+                        if (magnitude > (max_magnitude - value) / 10)
+                            throw std::runtime_error(location(line_no, col) + ": integer literal out of range");
+                        magnitude = magnitude * 10 + value;
+                    }
+                    if (magnitude <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+                        token.integer = static_cast<std::int64_t>(magnitude);
+                } else {
+                    char* end = nullptr;
+                    token.number = std::strtod(text.c_str(), &end);
+                    if (end != text.c_str() + text.size() || !std::isfinite(token.number))
+                        throw std::runtime_error(location(line_no, col) + ": malformed numeric literal");
+                }
+                out.push_back(std::move(token)); continue;
             }
             if (std::isalpha(ch) || line[i] == '_') {
                 std::size_t begin = i++;

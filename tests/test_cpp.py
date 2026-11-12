@@ -237,6 +237,45 @@ print(True == 1)
             ["False", "False", "False", "True"],
         )
 
+    def test_integer_float_runtime_arithmetic_and_boundaries(self):
+        self.assert_runs(
+            """\
+print(4)
+print(4.0)
+print(4e0)
+print(9223372036854775807)
+print(-9223372036854775808)
+print(1 + 2)
+print(1.5 + 2.25)
+print(1 + 0.5)
+print(-7 // 3, -7 % 3)
+print(2 ** 10, 2 ** -2, 1 / 2)
+""",
+            [
+                "4",
+                "4",
+                "4",
+                "9223372036854775807",
+                "-9223372036854775808",
+                "3",
+                "3.75",
+                "1.5",
+                "-3 2",
+                "1024 0.25 0.5",
+            ],
+        )
+        self.assert_fails(
+            "print(9223372036854775807 + 1)\n",
+            "integer overflow",
+        )
+        self.assert_fails(
+            "print(9223372036854775808)\n",
+            "integer literal out of range",
+            "check",
+        )
+        self.assert_fails("print(1 // 0)\n", "division by zero")
+        self.assert_fails("print(-9223372036854775808 // -1)\n", "integer overflow")
+
     def test_supported_string_escapes(self):
         self.assert_runs(
             r'''print("quote: \" slash: \\")''' + "\n",
@@ -295,7 +334,7 @@ print(True == 1)
             "1e308 * 1e308",
             "1 / 1e-320",
             "(-1) ** 0.5",
-            "10 ** 10000",
+            "10.0 ** 10000",
         ):
             with self.subTest(expression=expression):
                 self.assert_fails(

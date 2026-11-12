@@ -1,10 +1,11 @@
 # Rolang Phase 2A: Runtime Value and Type Architecture
 
-**Status: design proposal only.** This document describes the active C++17
-implementation and recommends an architecture for future work. It does not
-change the compiler, VM, or language behavior. Numeric and equality choices
-below remain proposals until the decisions in
-[SEMANTICS_DECISIONS.md](SEMANTICS_DECISIONS.md) are approved.
+**Status: architecture record; Phase 2B runtime implementation is complete.**
+The initial implementation analysis below records the Phase 2A baseline, and
+the recommendations remain proposals rather than normative language approval.
+Current behavior is documented in [LANGUAGE_SPEC.md](LANGUAGE_SPEC.md), and
+implementation choices still awaiting language approval are tracked in
+[SEMANTICS_DECISIONS.md](SEMANTICS_DECISIONS.md).
 
 ## 1. Current implementation analysis
 
