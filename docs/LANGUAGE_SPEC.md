@@ -1,9 +1,11 @@
-# Rolang Language Specification (Current Implementation)
+# Rolang Language Specification (Current C++ Implementation)
 
 This document describes the language accepted and executed by the active
 C++17 compiler and VM in `src/frontend.cpp` and `src/backend.cpp`. It records
 the implementation as it exists; it does not approve or settle the open
-design questions in [SEMANTICS_DECISIONS.md](SEMANTICS_DECISIONS.md).
+design questions in [SEMANTICS_DECISIONS.md](SEMANTICS_DECISIONS.md) or the proposed
+Version 1 contract in [V1_SEMANTICS_PROPOSAL.md](V1_SEMANTICS_PROPOSAL.md).
+It is a current-behavior reference, not the normative Version 1 specification.
 Rolang is not Python. The C-compatible `src/*.c` code and `rolange.py` are
 retained prototypes, not the implementation built by the Makefile. The Python
 tests exercise that separate prototype; they do not establish C++ Rolang
