@@ -1,12 +1,12 @@
-let greeting = "Hello, Rolang!";
-print(greeting);
+CC = gcc
+CFLAGS = -std=c11 -Wall -Wextra -O2
+SRC = src/ast.c src/lexer.c src/parser.c src/vm.c src/main.c
+OUT = rolang
 
-fn factorial(n) {
-  if (n <= 1) {
-    return 1;
-  }
-  return n * factorial(n - 1);
-}
+all:
+	$(CC) $(CFLAGS) $(SRC) -o $(OUT)
 
-let n = 5;
-print(factorial(n));
+clean:
+	rm -f $(OUT)
+
+.PHONY: all clean
