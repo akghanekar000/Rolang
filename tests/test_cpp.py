@@ -190,6 +190,16 @@ print(True == 1)
             ["False", "False", "False", "True"],
         )
 
+    def test_supported_string_escapes(self):
+        self.assert_runs(
+            r'''print("quote: \" slash: \\")''' + "\n",
+            ['quote: " slash: \\'],
+        )
+        self.assert_runs(
+            r'''print("line one\nline two\ttab")''' + "\n",
+            ["line one", "line two\ttab"],
+        )
+
     def test_tabs_are_rejected_in_indentation(self):
         self.assert_fails("if True:\n\tpass\n", "tabs are not allowed in indentation", "check")
 

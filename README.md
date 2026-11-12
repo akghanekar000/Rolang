@@ -34,6 +34,8 @@ print("factorial:", factorial(5))
 
 The supported initial grammar includes function definitions and positional parameters, `return`, `if`/`else`, `while`, `pass`, name assignment, nested and recursive calls, numeric and string literals, `True`, `False`, `None`, arithmetic (`+ - * / // % **`), comparisons, short-circuiting `and`/`or`, unary operators, and parentheses. `and` and `or` short-circuit and always return a boolean; they do not return either original operand. `not` binds less tightly than comparisons; exponentiation binds more tightly than unary `+` and `-`. Calls and function definitions accept a trailing comma. The built-in `print` accepts multiple values. Indentation uses spaces; tabs in leading indentation are rejected. Lists, `for`, imports, classes, comprehensions, exceptions, and full Python compatibility are not implemented.
 
+See [docs/LANGUAGE_SPEC.md](docs/LANGUAGE_SPEC.md) for the current C++ compiler's syntax and behavior, and [docs/SEMANTICS_DECISIONS.md](docs/SEMANTICS_DECISIONS.md) for language-design questions that remain open.
+
 ## Compiler architecture
 
 - `src/frontend.cpp`: source-position-aware lexer with `NEWLINE`, `INDENT`, and `DEDENT`; AST and parser.
