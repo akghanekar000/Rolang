@@ -32,7 +32,7 @@ def factorial(n):
 print("factorial:", factorial(5))
 ```
 
-The supported initial grammar includes function definitions and positional parameters, `return`, `if`/`else`, `while`, `pass`, name assignment, nested and recursive calls, numeric and string literals, `True`, `False`, `None`, arithmetic (`+ - * / // % **`), comparisons, short-circuiting `and`/`or`, unary operators, and parentheses. `not` binds less tightly than comparisons; exponentiation binds more tightly than unary `+` and `-`. Calls and function definitions accept a trailing comma. The built-in `print` accepts multiple values. Indentation uses spaces; tabs in leading indentation are rejected. Lists, `for`, imports, classes, comprehensions, exceptions, and full Python compatibility are not implemented.
+The supported initial grammar includes function definitions and positional parameters, `return`, `if`/`else`, `while`, `pass`, name assignment, nested and recursive calls, numeric and string literals, `True`, `False`, `None`, arithmetic (`+ - * / // % **`), comparisons, short-circuiting `and`/`or`, unary operators, and parentheses. `and` and `or` short-circuit and always return a boolean; they do not return either original operand. `not` binds less tightly than comparisons; exponentiation binds more tightly than unary `+` and `-`. Calls and function definitions accept a trailing comma. The built-in `print` accepts multiple values. Indentation uses spaces; tabs in leading indentation are rejected. Lists, `for`, imports, classes, comprehensions, exceptions, and full Python compatibility are not implemented.
 
 ## Compiler architecture
 

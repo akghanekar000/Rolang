@@ -75,14 +75,39 @@ print(value)
             """\
 def positive(value):
     return value > 0
+def identity(value):
+    return value
 count = 2
-while positive(count):
-    if positive(count - 1):
+while positive(identity(count)):
+    if positive(identity(count - 1)):
         print(count)
     count = count - 1
 """,
             ["2"],
         )
+
+    def test_normal_deep_and_infinite_recursion(self):
+        self.assert_runs(
+            """\
+def recurse(n):
+    if n == 0:
+        return 0
+    return recurse(n - 1)
+print(recurse(20))
+""",
+            ["0"],
+        )
+        self.assert_fails(
+            "def recurse(n):\n    return recurse(n - 1)\nrecurse(500)\n",
+            "maximum call depth exceeded",
+        )
+        self.assert_fails(
+            "def recurse():\n    return recurse()\nrecurse()\n",
+            "maximum call depth exceeded",
+        )
+
+    def test_instruction_limit_still_stops_non_recursive_loops(self):
+        self.assert_fails("while True:\n    pass\n", "execution limit exceeded")
 
     def test_short_circuit_skips_unselected_operand(self):
         self.assert_runs(
@@ -93,6 +118,55 @@ print(0 and missing_name)
 print(1 or missing_name)
 """,
             ["False", "True", "False", "True"],
+        )
+
+    def test_and_or_short_circuit_and_return_booleans(self):
+        self.assert_runs(
+            """\
+print(0 and missing_name)
+print(1 or missing_name)
+print("left" and "right")
+print("" or "fallback")
+""",
+            ["False", "True", "True", "True"],
+        )
+
+    def test_mixed_boolean_and_comparison_precedence(self):
+        self.assert_runs(
+            """\
+print(not 1 == 2 and 3 < 4 or False)
+print(not (1 < 2) or 3 == 3 and False)
+""",
+            ["True", "False"],
+        )
+
+    def test_print_marker_collision_and_function_shadowing(self):
+        self.assert_runs(
+            """\
+print("__rolang_builtin_print__")
+def print(value):
+    return value + 1
+print(print(4))
+""",
+            ["__rolang_builtin_print__"],
+        )
+        self.assert_fails(
+            'ordinary = "__rolang_builtin_print__"\nordinary()\n',
+            "object is not callable",
+        )
+
+    def test_return_is_only_valid_inside_functions(self):
+        self.assert_fails("return 1\n", "return outside a function", "check")
+        self.assert_fails("if True:\n    return 1\n", "return outside a function", "check")
+        self.assert_runs(
+            """\
+def choose():
+    if True:
+        return 7
+    return 0
+print(choose())
+""",
+            ["7"],
         )
 
     def test_not_has_lower_precedence_than_comparisons(self):
@@ -119,23 +193,58 @@ print(True == 1)
     def test_tabs_are_rejected_in_indentation(self):
         self.assert_fails("if True:\n\tpass\n", "tabs are not allowed in indentation", "check")
 
+    def test_inconsistent_indentation_and_mixed_tabs_and_spaces(self):
+        self.assert_fails(
+            "if True:\n    pass\n  pass\n",
+            "inconsistent indentation",
+            "check",
+        )
+        self.assert_fails(
+            "if True:\n \tpass\n",
+            "tabs are not allowed in indentation",
+            "check",
+        )
+
     def test_delimiters_and_malformed_literals_report_locations(self):
         self.assert_fails("print(1))\n", "unmatched ')'", "check")
         self.assert_fails("print(1\n", "unclosed '('", "check")
         self.assert_fails("print(1.2.3)\n", "malformed numeric literal", "check")
+        self.assert_fails("print(1e)\n", "malformed numeric literal", "check")
+        self.assert_fails("print(1e+)\n", "malformed numeric literal", "check")
         self.assert_fails('print("bad\\q")\n', "invalid escape sequence", "check")
+        self.assert_fails('print("incomplete\\\n', "incomplete escape sequence", "check")
         self.assert_fails('print("unterminated)\n', "unterminated string literal", "check")
+        self.assert_fails("def duplicate(value, value):\n    pass\n", "duplicate parameter", "check")
 
     def test_parser_reports_unexpected_token_and_empty_block(self):
         self.assert_fails("print(,)\n", "expected expression", "check")
         self.assert_fails("if True:\n", "expected an indented block", "check")
         result = self.run_source("print(,)\n", "check")
-        self.assertRegex(result.stderr, r"1:\d+: expected expression")
+        self.assertRegex(result.stderr, r"1:7: expected expression")
+        result = self.run_source("print(1)\nprint(,)\n", "check")
+        self.assertRegex(result.stderr, r"2:7: expected expression")
 
     def test_runtime_errors_include_source_line(self):
-        self.assert_fails("print(1 / 0)\n", "line 1: division by zero")
+        self.assert_fails("print(1 / 0)\n", "line 1:9: division by zero")
         self.assert_fails("def add(a, b):\n    return a + b\nadd(1)\n", "takes 2 argument(s), got 1")
         self.assert_fails("print(1 % 0)\n", "modulo by zero")
+        result = self.run_source("print(1)\nprint(2 / 0)\n")
+        self.assertRegex(result.stderr, r"line 2:9: division by zero")
+
+    def test_non_finite_arithmetic_results_are_errors(self):
+        for expression in (
+            "1e308 + 1e308",
+            "-1e308 - 1e308",
+            "1e308 * 1e308",
+            "1 / 1e-320",
+            "(-1) ** 0.5",
+            "10 ** 10000",
+        ):
+            with self.subTest(expression=expression):
+                self.assert_fails(
+                    f"print({expression})\n",
+                    "arithmetic result is not finite",
+                )
 
 
 if __name__ == "__main__":

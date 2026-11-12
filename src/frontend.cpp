@@ -25,6 +25,7 @@ public:
     }
     Node program() {
         Node root{NodeKind::Program, peek().line};
+        root.column = peek().column;
         while (peek().kind != TokenKind::End) {
             if (match(TokenKind::Newline)) continue;
             root.children.push_back(statement());
@@ -34,6 +35,7 @@ public:
 private:
     const std::vector<Token>& tokens_;
     std::size_t pos_ = 0;
+    int function_depth_ = 0;
     const Token& peek(std::size_t offset = 0) const { return tokens_[std::min(pos_ + offset, tokens_.size() - 1)]; }
     Token take() { Token t = peek(); if (pos_ + 1 < tokens_.size()) ++pos_; return t; }
     bool match(TokenKind kind) { if (peek().kind == kind) { take(); return true; } return false; }
@@ -46,7 +48,7 @@ private:
         if (peek().text == text) return take();
         throw std::runtime_error(location(peek().line, peek().column) + ": expected '" + text + "', got '" + peek().text + "'");
     }
-    Node block(int line) {
+    Node block(int line, int column) {
         expect(TokenKind::Newline, "newline after ':'");
         expect(TokenKind::Indent, "an indented block");
         Node n{NodeKind::Block, line};
@@ -55,7 +57,7 @@ private:
             n.children.push_back(statement());
         }
         expect(TokenKind::Dedent, "end of indented block");
-        if (n.children.empty()) throw std::runtime_error(std::to_string(line) + ": empty block; add 'pass'");
+        if (n.children.empty()) throw std::runtime_error(location(line, column) + ": empty block; add 'pass'");
         return n;
     }
     Node statement() {
@@ -64,6 +66,7 @@ private:
             Token name = expect(TokenKind::Name, "function name");
             expect_text("(");
             Node n{NodeKind::Function, start.line}; n.text = name.text;
+            n.column = start.column;
             if (peek().text != ")") {
                 while (true) {
                     n.params.push_back(expect(TokenKind::Name, "parameter name").text);
@@ -75,27 +78,33 @@ private:
             for (std::size_t i = 0; i < n.params.size(); ++i)
                 for (std::size_t j = i + 1; j < n.params.size(); ++j)
                     if (n.params[i] == n.params[j]) throw std::runtime_error(location(name.line, name.column) + ": duplicate parameter");
-            n.children.push_back(block(start.line)); return n;
+            ++function_depth_;
+            n.children.push_back(block(start.line, start.column));
+            --function_depth_;
+            return n;
         }
         if (match_text("if")) {
-            Node n{NodeKind::If, start.line}; n.children.push_back(expression()); expect_text(":"); n.children.push_back(block(start.line));
-            if (match_text("else")) { expect_text(":"); n.children.push_back(block(start.line)); }
+            Node n{NodeKind::If, start.line}; n.column = start.column; n.children.push_back(expression()); expect_text(":"); n.children.push_back(block(start.line, start.column));
+            if (match_text("else")) { expect_text(":"); n.children.push_back(block(start.line, start.column)); }
             return n;
         }
         if (match_text("while")) {
-            Node n{NodeKind::While, start.line}; n.children.push_back(expression()); expect_text(":"); n.children.push_back(block(start.line)); return n;
+            Node n{NodeKind::While, start.line}; n.column = start.column; n.children.push_back(expression()); expect_text(":"); n.children.push_back(block(start.line, start.column)); return n;
         }
         if (match_text("return")) {
+            if (function_depth_ == 0)
+                throw std::runtime_error(location(start.line, start.column) + ": return outside a function");
             Node n{NodeKind::Return, start.line};
+            n.column = start.column;
             if (peek().kind != TokenKind::Newline) n.children.push_back(expression());
             expect(TokenKind::Newline, "end of line"); return n;
         }
-        if (match_text("pass")) { expect(TokenKind::Newline, "end of line"); return Node{NodeKind::Pass, start.line}; }
+        if (match_text("pass")) { expect(TokenKind::Newline, "end of line"); Node n{NodeKind::Pass, start.line}; n.column = start.column; return n; }
         if (peek().kind == TokenKind::Name && peek(1).text == "=") {
-            Node n{NodeKind::Assign, start.line}; n.text = take().text; take(); n.children.push_back(expression());
+            Node n{NodeKind::Assign, start.line}; n.column = start.column; n.text = take().text; take(); n.children.push_back(expression());
             expect(TokenKind::Newline, "end of line"); return n;
         }
-        Node n{NodeKind::Expression, start.line}; n.children.push_back(expression());
+        Node n{NodeKind::Expression, start.line}; n.column = start.column; n.children.push_back(expression());
         expect(TokenKind::Newline, "end of line"); return n;
     }
     int precedence(const Token& t) const {
@@ -111,6 +120,7 @@ private:
     Node expression(int min_precedence = 0) {
         Token t = take();
         Node left{NodeKind::Literal, t.line};
+        left.column = t.column;
         if (t.kind == TokenKind::Number) { left.number = t.number; }
         else if (t.kind == TokenKind::String) { left.text = t.text; left.kind = NodeKind::Literal; left.number = 0; left.string_literal = true; }
         else if (t.kind == TokenKind::Name) { left.kind = NodeKind::Name; left.text = t.text; }
@@ -124,7 +134,7 @@ private:
         else throw std::runtime_error(location(t.line, t.column) + ": expected expression, got '" + t.text + "'");
         while (true) {
             if (peek().text == "(" && 9 >= min_precedence) {
-                Token call = take(); Node n{NodeKind::Call, call.line}; n.children.push_back(left);
+                Token call = take(); Node n{NodeKind::Call, call.line}; n.column = call.column; n.children.push_back(left);
                 if (peek().text != ")") {
                     while (true) {
                         n.children.push_back(expression());
@@ -135,7 +145,7 @@ private:
                 expect_text(")"); left = std::move(n); continue;
             }
             int p = precedence(peek()); if (p < min_precedence) break;
-            Token op = take(); Node n{NodeKind::Binary, op.line}; n.text = op.text;
+            Token op = take(); Node n{NodeKind::Binary, op.line}; n.column = op.column; n.text = op.text;
             n.children.push_back(left); n.children.push_back(expression(p + (op.text == "**" ? 0 : 1))); left = std::move(n);
         }
         return left;

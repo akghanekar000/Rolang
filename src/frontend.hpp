@@ -24,6 +24,7 @@ struct Node {
     std::vector<std::string> params{};
     std::vector<Node> children{};
     bool string_literal = false;
+    int column = 1;
 };
 
 std::vector<Token> tokenize(const std::string& source);
